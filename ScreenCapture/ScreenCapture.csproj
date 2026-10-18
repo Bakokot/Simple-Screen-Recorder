@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <!-- Still used for the zone selector / recording border overlays and for Screen enumeration. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WPF owns startup, so DPI awareness lives in the manifest, not in WinForms ApplicationHighDpiMode. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <AssemblyName>ScreenCapture</AssemblyName>
+    <Product>Screen Capture</Product>
+    <Copyright>Copyright (C) 2026 Bakou. Licensed under the GNU GPL v3 or later.</Copyright>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF and WinForms share many type names (Application, Button, Point, Color…): import them explicitly per file. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="WPF-UI" Version="4.2.1" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+
+# IDE and user-specific files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Local test recordings
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.gif
