@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The app: Avalonia interface on top of ScreenCapture.Core and the platform backend.
-       net9.0-windows is the Windows app; net9.0 builds the same interface for Linux, which has no backend yet. -->
+       net9.0-windows is the Windows app; net9.0 is the Linux app. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFrameworks>net9.0-windows;net9.0</TargetFrameworks>
@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ScreenCapture.Core\ScreenCapture.Core.csproj" />
     <ProjectReference Include="..\ScreenCapture.Windows\ScreenCapture.Windows.csproj" Condition="'$(TargetFramework)' == 'net9.0-windows'" />
+    <ProjectReference Include="..\ScreenCapture.Linux\ScreenCapture.Linux.csproj" Condition="'$(TargetFramework)' == 'net9.0'" />
   </ItemGroup>
 
   <ItemGroup>

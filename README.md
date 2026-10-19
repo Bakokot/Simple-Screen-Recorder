@@ -1,6 +1,6 @@
 # Screen Capture
 
-A lightweight, no-nonsense screen recorder for Windows 10 / 11.
+A lightweight, no-nonsense screen recorder for Windows 10 / 11, with a Linux version in progress.
 Pick a region or a whole screen, choose which sounds to record, hit the big red button.
 Built to stay out of the way: frames are captured and encoded on the GPU, so recording a game
 barely touches its frame rate.
@@ -43,6 +43,8 @@ barely touches its frame rate.
 
 ## Requirements
 
+### Windows
+
 - **Windows 10 version 2004** or later (needed for per-app sound), or Windows 11.
 - [**.NET 9 Desktop Runtime**](https://dotnet.microsoft.com/download/dotnet/9.0).
 - [**FFmpeg**](https://ffmpeg.org/) **6.0 or later**, which does the encoding. The easiest way to install it:
@@ -52,6 +54,21 @@ barely touches its frame rate.
   You can also put `ffmpeg.exe` next to `ScreenCapture.exe`. The app finds FFmpeg there, on the `PATH`,
   or in the winget install folder.
 - Optional: an **NVIDIA GPU** for hardware encoding. Other GPUs work too, with software encoding.
+
+### Linux (preview)
+
+- An **X11** or **Wayland** desktop, with PulseAudio or PipeWire for sound.
+- **FFmpeg 6.0 or later** (`sudo apt install ffmpeg` on Ubuntu 24.04 / Debian 13; older releases ship an older FFmpeg).
+- `pactl` to list the sound devices (`pulseaudio-utils`; without it only the default devices are offered).
+- On **Wayland**: GStreamer with its PipeWire plugin (`sudo apt install gstreamer1.0-tools gstreamer1.0-pipewire`)
+  and a desktop portal with screen sharing (included with GNOME and KDE Plasma).
+- Optional: hardware encoding with **NVENC** (NVIDIA) or **VAAPI** (AMD, Intel); x264 otherwise.
+
+What is different on Linux:
+- On Wayland, the desktop asks once which screens the app may record. A zone must fit within one screen.
+- On Wayland there is no global shortcut yet; use the record button.
+- "Only selected apps" sound is not available yet; system sound and microphone are.
+- The app window cannot hide itself from the recording.
 
 ## Build and run
 
@@ -64,15 +81,21 @@ dotnet build -c Release
 Then run `ScreenCapture/bin/Release/net9.0-windows/ScreenCapture.exe`.
 Building needs the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
 
-The code is split so that Linux support can be added later:
+For Linux, build a self-contained app (no .NET needed on the target machine):
+
+```
+dotnet publish ScreenCapture -f net9.0 -r linux-x64 --self-contained -c Release -o out/linux
+./out/linux/ScreenCapture
+```
+
+The code is split by operating system:
 
 | Project | Contents |
 |---|---|
 | `ScreenCapture.Core` | Everything that does not depend on the operating system: settings, formats, FFmpeg recording and muxing, and the `IPlatform` interface |
 | `ScreenCapture.Windows` | The Windows implementation of `IPlatform`: capture, sound, region selector, red frame, global shortcut |
-| `ScreenCapture` | The interface (Avalonia), built for Windows (`net9.0-windows`) and for other systems (`net9.0`) |
-
-The `net9.0` build compiles but does not run yet: there is no Linux implementation of `IPlatform` so far.
+| `ScreenCapture.Linux` | The Linux implementation of `IPlatform` |
+| `ScreenCapture` | The interface (Avalonia), built for Windows (`net9.0-windows`) and for Linux (`net9.0`) |
 
 ## How to use
 
@@ -87,15 +110,15 @@ can keep it from presenting directly to the screen and lower its frame rate.
 
 ## How it works
 
-| Part | What it uses |
-|---|---|
-| Video capture | FFmpeg `ddagrab` (DXGI Desktop Duplication), GDI `BitBlt` as a fallback |
-| Video encoding | FFmpeg: `h264_nvenc` on NVIDIA GPUs, `libx264` otherwise |
-| Sound | WASAPI loopback, per-process loopback and capture, through [NAudio](https://github.com/naudio/NAudio) |
-| Final file | FFmpeg muxes video and sound, or converts to WebM / GIF |
-| Interface | [Avalonia](https://avaloniaui.net/) with its Fluent theme and [Fluent UI System Icons](https://github.com/davidxuang/FluentIcons); the region selector and red frame are WinForms windows |
+| Part | Windows | Linux |
+|---|---|---|
+| Video capture | FFmpeg `ddagrab` (DXGI Desktop Duplication), GDI `BitBlt` as a fallback | X11: FFmpeg `x11grab`. Wayland: ScreenCast portal → PipeWire, read by GStreamer |
+| Video encoding | FFmpeg: `h264_nvenc` on NVIDIA GPUs, `libx264` otherwise | FFmpeg: `h264_nvenc`, `h264_vaapi`, or `libx264` |
+| Sound | WASAPI loopback, per-process loopback and capture, through [NAudio](https://github.com/naudio/NAudio) | FFmpeg's PulseAudio input (also works with PipeWire) |
+| Final file | FFmpeg muxes video and sound, or converts to WebM / GIF | Same |
+| Interface | [Avalonia](https://avaloniaui.net/) with its Fluent theme and [Fluent UI System Icons](https://github.com/davidxuang/FluentIcons); the region selector and red frame are WinForms windows | Same interface; Avalonia region selector and red frame |
 
-Settings are stored in `%APPDATA%\ScreenCapture\settings.json`.
+Settings are stored in `%APPDATA%\ScreenCapture\settings.json` on Windows and `~/.config/ScreenCapture/settings.json` on Linux.
 
 ## About this project
 
@@ -128,6 +151,8 @@ You should have received a copy of the GNU General Public License along with thi
 | [NAudio](https://github.com/naudio/NAudio) | MIT | NuGet package, included in the build |
 | [Avalonia](https://github.com/AvaloniaUI/Avalonia) | MIT | NuGet package, included in the build |
 | [FluentIcons](https://github.com/davidxuang/FluentIcons) | MIT | NuGet package, included in the build (icons from Microsoft's Fluent UI System Icons, MIT) |
+| [Tmds.DBus](https://github.com/tmds/Tmds.DBus) | MIT | NuGet package, included in the Linux build |
+| [GStreamer](https://gstreamer.freedesktop.org/) | LGPL 2.1+ | **Not included.** Installed separately on Linux (Wayland) and run as a separate program |
 | [FFmpeg](https://ffmpeg.org/) | LGPL 2.1+ / GPL 2+, depending on the build | **Not included.** Installed separately by the user and run as a separate program |
 
 FFmpeg is a trademark of Fabrice Bellard. NVIDIA and NVENC are trademarks of NVIDIA Corporation.

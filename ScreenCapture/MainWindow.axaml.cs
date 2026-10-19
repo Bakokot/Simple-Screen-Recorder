@@ -116,6 +116,8 @@ public partial class MainWindow : Window
     private VideoQuality SelectedQuality => ((Choice<VideoQuality>)QualityBox.SelectedItem!).Value;
     private int SelectedFps => ((Choice<int>)FpsBox.SelectedItem!).Value;
     private string OutputFolder => (FolderBox.Text ?? "").Trim();
+    /// <summary>Record only the selected apps instead of everything the output device plays.</summary>
+    private bool AppsOnly => _platform.SupportsAppAudio && OnlyAppsRadio.IsChecked == true;
 
     // ---------------------------------------------------------------- window events
 
@@ -305,12 +307,12 @@ public partial class MainWindow : Window
         bool supported = FormatInfo.SupportsAudio(SelectedFormat);
         bool audio = supported && _recorder == null && !_busy;
         bool system = SysAudioSwitch.IsChecked == true;
-        bool appsOnly = OnlyAppsRadio.IsChecked == true;
+        bool appsOnly = AppsOnly;
         SysAudioSwitch.IsEnabled = MicSwitch.IsEnabled = audio;
         // Per-app capture follows the apps whatever device they play on.
         SysDeviceBox.IsEnabled = audio && system && !appsOnly;
         MicDeviceBox.IsEnabled = audio && MicSwitch.IsChecked == true;
-        AppsPanel.IsVisible = supported && system;
+        AppsPanel.IsVisible = supported && system && _platform.SupportsAppAudio;
         AppsPanel.IsEnabled = audio;
         AppsListBorder.IsVisible = AppsHint.IsVisible = appsOnly;
         SoundHint.Text = $"{FormatInfo.DisplayName(SelectedFormat)} videos have no sound.";
@@ -501,7 +503,7 @@ public partial class MainWindow : Window
 
         bool sound = FormatInfo.SupportsAudio(format);
         bool systemSound = sound && SysAudioSwitch.IsChecked == true;
-        bool appsOnly = systemSound && OnlyAppsRadio.IsChecked == true;
+        bool appsOnly = systemSound && AppsOnly;
         var sources = new List<AudioSource>();
         if (systemSound && !appsOnly) sources.Add(new SystemSound(((AudioDevice)SysDeviceBox.SelectedItem!).Id));
         if (appsOnly)

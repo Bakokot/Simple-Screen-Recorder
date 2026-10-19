@@ -33,13 +33,21 @@ public sealed class AppSettings
     public List<string> SystemAudioApps { get; set; } = [];
     public bool CaptureMicrophone { get; set; }
     public string? MicrophoneDeviceId { get; set; }
-    public string OutputFolder { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Screen Captures");
+    public string OutputFolder { get; set; } = Path.Combine(VideosFolder(), "Screen Captures");
     /// <summary>Window size as [width, height] once resized by the user; null while it fits its content.</summary>
     public double[]? WindowSize { get; set; }
     public bool WindowMaximized { get; set; }
     /// <summary>Last capture zone as [x, y, width, height] in screen pixels.</summary>
     public int[]? Region { get; set; }
+
+    /// <summary>The user's Videos folder; on Linux it is unknown when the XDG user folders are not set up.</summary>
+    private static string VideosFolder()
+    {
+        var videos = Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
+        return string.IsNullOrEmpty(videos)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Videos")
+            : videos;
+    }
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScreenCapture", "settings.json");

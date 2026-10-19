@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Linux implementation of IPlatform: x11grab or the Wayland ScreenCast portal (PipeWire, read through GStreamer),
+       PulseAudio / PipeWire sound through FFmpeg, Avalonia overlays and the X11 global shortcut. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ScreenCapture</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenCapture.Core\ScreenCapture.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Tmds.DBus" Version="0.95.1" />
+  </ItemGroup>
+
+</Project>

@@ -44,7 +44,7 @@ internal static class Program
 #if WINDOWS
         return new WindowsPlatform();
 #else
-        return null;
+        return OperatingSystem.IsLinux() ? new LinuxPlatform() : null;
 #endif
     }
 

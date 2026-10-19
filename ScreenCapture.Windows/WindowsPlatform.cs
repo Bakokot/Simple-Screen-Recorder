@@ -48,6 +48,8 @@ public sealed class WindowsPlatform : IPlatform, IDisposable
         }
     }
 
+    public bool SupportsAppAudio => true;
+
     public IReadOnlyList<AudioApp> AppsWithSound() => AudioApps.WithAudioSessions(_devices);
 
     public AudioApp? FindRunningApp(string exe) =>
@@ -86,8 +88,8 @@ public sealed class WindowsPlatform : IPlatform, IDisposable
 
     // ---------------------------------------------------------------- video
 
-    public IEnumerable<VideoPipeline> VideoPipelines(RecordingOptions options, Rectangle region) =>
-        DdagrabCapture.Pipelines(options, region);
+    public Task<IReadOnlyList<VideoPipeline>> VideoPipelinesAsync(RecordingOptions options, Rectangle region) =>
+        Task.FromResult<IReadOnlyList<VideoPipeline>>(DdagrabCapture.Pipelines(options, region).ToList());
 
     // ---------------------------------------------------------------- desktop integration
 

@@ -52,6 +52,7 @@ public sealed class ScreenRecorder : IDisposable
     private readonly Stopwatch _clock = new();
     private readonly StringBuilder _ffmpegLog = new();
     private readonly List<IAudioTrack> _audio = [];
+    private IReadOnlyList<VideoPipeline> _pipelines = [];
     private VideoPipeline? _pipeline;
     private Process? _encoder;
     private Thread? _captureThread;
@@ -98,14 +99,16 @@ public sealed class ScreenRecorder : IDisposable
             // Audio starts before the first video frame; the lead-in is cut when muxing.
             foreach (var a in _audio) a.Start(_clock);
 
-            foreach (var pipeline in _platform.VideoPipelines(_o, _region))
+            _pipelines = await _platform.VideoPipelinesAsync(_o, _region);
+            foreach (var pipeline in _pipelines)
             {
                 _pipeline = pipeline;
                 switch (pipeline)
                 {
                     case FrameGrabberPipeline frames:
-                        StartFrameGrabber(frames);
-                        return;
+                        if (await TryStartFrameGrabberAsync(frames)) return;
+                        frames.OnFailed?.Invoke();
+                        break;
                     case FfmpegGrabPipeline grab:
                         if (await TryStartFfmpegGrabAsync(grab)) return;
                         grab.OnFailed?.Invoke();
@@ -228,27 +231,51 @@ public sealed class ScreenRecorder : IDisposable
 
     // ---------------------------------------------------------------- capture by the app (fallback)
 
-    private void StartFrameGrabber(FrameGrabberPipeline pipeline)
+    /// <summary>Starts grabbing frames and the encoder; false if no frame could be encoded.</summary>
+    private async Task<bool> TryStartFrameGrabberAsync(FrameGrabberPipeline pipeline)
     {
         lock (_ffmpegLog) _ffmpegLog.Clear();
-        _encoder = StartFfmpeg(RawFramesEncoderArguments(), redirectInput: true);
-        _captureThread = new Thread(() => CaptureLoop(pipeline)) { IsBackground = true, Name = "Screen capture" };
+        var firstFrame = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var encoder = StartFfmpeg(RawFramesEncoderArguments(pipeline), redirectInput: true);
+        _encoder = encoder;
+        _captureThread = new Thread(() => CaptureLoop(pipeline, firstFrame)) { IsBackground = true, Name = "Screen capture" };
         _captureThread.Start();
+
+        var started = await Task.WhenAny(firstFrame.Task, encoder.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(10)));
+        if (started == firstFrame.Task && firstFrame.Task.IsCompletedSuccessfully && !encoder.HasExited) return true;
+
+        Debug.WriteLine($"{pipeline.Name} capture failed, falling back:\n{_captureError}\n{Log()}");
+        _stopRequested = true;
+        try { if (!encoder.HasExited) encoder.Kill(); } catch { }
+        // Grabbers give up waiting for a first frame after a while (see IFrameGrabber.Grab).
+        await Task.Run(() => _captureThread.Join(TimeSpan.FromSeconds(15)));
+        encoder.Dispose();
+        _encoder = null;
+        _captureThread = null;
+        _stopRequested = false;
+        _framesWritten = 0;
+        _captureError = null;
+        return false;
     }
 
-    private void CaptureLoop(FrameGrabberPipeline pipeline)
+    private void CaptureLoop(FrameGrabberPipeline pipeline, TaskCompletionSource firstFrame)
     {
         try
         {
             using var grabber = pipeline.CreateGrabber();
             var stdin = _encoder!.StandardInput.BaseStream;
             double frameMs = 1000.0 / _o.Fps;
-            _videoStartedAt = _clock.Elapsed;
-            var sw = Stopwatch.StartNew();
+            var sw = new Stopwatch();
 
             while (!_stopRequested)
             {
                 var frame = grabber.Grab();
+                if (!sw.IsRunning)
+                {
+                    // The first Grab may wait for the source to deliver a frame: the video starts now.
+                    _videoStartedAt = _clock.Elapsed;
+                    sw.Start();
+                }
 
                 // Keep a constant frame rate tied to wall-clock time: if capture or encoding fell behind,
                 // repeat the frame so the video duration matches reality (and stays in sync with audio).
@@ -259,6 +286,7 @@ public sealed class ScreenRecorder : IDisposable
                     stdin.Write(frame);
                     _framesWritten++;
                 }
+                firstFrame.TrySetResult();
 
                 var wait = _framesWritten * frameMs - sw.Elapsed.TotalMilliseconds;
                 if (wait > 1) Thread.Sleep((int)wait);
@@ -267,22 +295,24 @@ public sealed class ScreenRecorder : IDisposable
         catch (Exception ex)
         {
             _captureError = ex;
+            firstFrame.TrySetException(ex);
         }
     }
 
     // ---------------------------------------------------------------- ffmpeg
 
-    private List<string> RawFramesEncoderArguments()
+    private List<string> RawFramesEncoderArguments(FrameGrabberPipeline pipeline)
     {
-        var args = new List<string>
-        {
-            "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "rawvideo", "-pix_fmt", "bgra",
-            "-video_size", $"{_region.Width}x{_region.Height}",
+        var size = pipeline.FrameSize ?? _region.Size;
+        var args = new List<string> { "-hide_banner", "-loglevel", "error", "-y" };
+        args.AddRange(pipeline.InputArguments);
+        args.AddRange([
+            "-f", "rawvideo", "-pix_fmt", pipeline.PixelFormat,
+            "-video_size", $"{size.Width}x{size.Height}",
             "-framerate", _o.Fps.ToString(CultureInfo.InvariantCulture),
             "-i", "-",
-        };
-        args.AddRange(EncoderArguments.X264(_o, _region));
+        ]);
+        args.AddRange(pipeline.Encoder ?? EncoderArguments.X264(_o, new Rectangle(Point.Empty, size)));
         args.Add(_tempVideo);
         return args;
     }
@@ -374,6 +404,8 @@ public sealed class ScreenRecorder : IDisposable
         _encoder?.Dispose();
         foreach (var a in _audio) a.Dispose();
         _audio.Clear();
+        foreach (var r in _pipelines.Select(p => p.Resources).OfType<IDisposable>().Distinct()) r.Dispose();
+        _pipelines = [];
         try { Directory.Delete(_tempDir, recursive: true); } catch { /* best effort */ }
     }
 }

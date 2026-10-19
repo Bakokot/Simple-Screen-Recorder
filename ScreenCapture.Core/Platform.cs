@@ -28,6 +28,8 @@ public interface IPlatform
 
     IReadOnlyList<AudioDevice> OutputDevices();
     IReadOnlyList<AudioDevice> InputDevices();
+    /// <summary>Whether the sound of chosen apps can be recorded on its own ("Only selected apps").</summary>
+    bool SupportsAppAudio { get; }
     /// <summary>Apps that currently play sound, for "Only selected apps".</summary>
     IReadOnlyList<AudioApp> AppsWithSound();
     /// <summary>A running copy of the app, or null if it is not running.</summary>
@@ -41,7 +43,8 @@ public interface IPlatform
     // ---------------------------------------------------------------- video
 
     /// <summary>Ways to capture <paramref name="region"/>, best first; the recorder uses the first one that starts.</summary>
-    IEnumerable<VideoPipeline> VideoPipelines(RecordingOptions options, Rectangle region);
+    /// <remarks>May ask the user for permission to capture the screen (Wayland).</remarks>
+    Task<IReadOnlyList<VideoPipeline>> VideoPipelinesAsync(RecordingOptions options, Rectangle region);
 
     // ---------------------------------------------------------------- desktop integration
 
@@ -80,7 +83,11 @@ public sealed record AppSound(int ProcessId) : AudioSource;
 public sealed record Microphone(string? DeviceId) : AudioSource;
 
 /// <summary>One way to capture and encode the video.</summary>
-public abstract record VideoPipeline(string Name);
+public abstract record VideoPipeline(string Name)
+{
+    /// <summary>Released when the recording ends, whichever pipeline was used; pipelines may share it.</summary>
+    public IDisposable? Resources { get; init; }
+}
 
 /// <summary>
 /// FFmpeg grabs the screen itself. <see cref="Arguments"/> are the input, filter and encoder options; the
@@ -96,12 +103,28 @@ public sealed record FfmpegGrabPipeline(string Name, IReadOnlyList<string> Argum
     public Action? OnFailed { get; init; }
 }
 
-/// <summary>The app grabs the frames and pipes them to FFmpeg as raw BGRA.</summary>
+/// <summary>The app grabs the frames and pipes them to FFmpeg as raw 32-bit pixels.</summary>
 /// <param name="CreateGrabber">Called on the capture thread, which then uses and disposes the grabber.</param>
-public sealed record FrameGrabberPipeline(string Name, Func<IFrameGrabber> CreateGrabber) : VideoPipeline(Name);
+public sealed record FrameGrabberPipeline(string Name, Func<IFrameGrabber> CreateGrabber) : VideoPipeline(Name)
+{
+    /// <summary>FFmpeg name of the 4-byte pixel format of the frames.</summary>
+    public string PixelFormat { get; init; } = "bgra";
+    /// <summary>Size of the frames, when it differs from the zone (screens scaled on Wayland). Must be even.</summary>
+    public Size? FrameSize { get; init; }
+    /// <summary>Options placed before the input (e.g. a hardware device for the encoder).</summary>
+    public IReadOnlyList<string> InputArguments { get; init; } = [];
+    /// <summary>Encoder options; libx264 when null.</summary>
+    public IReadOnlyList<string>? Encoder { get; init; }
+    /// <summary>Called when the pipeline could not start.</summary>
+    public Action? OnFailed { get; init; }
+}
 
 public interface IFrameGrabber : IDisposable
 {
-    /// <summary>Captures one frame: top-down BGRA rows of the zone, valid until the next call.</summary>
+    /// <summary>Captures one frame: top-down rows of the zone, valid until the next call.</summary>
+    /// <remarks>
+    /// May wait for the first frame (and must throw if none comes within a few seconds); afterwards it returns
+    /// the latest one without waiting.
+    /// </remarks>
     ReadOnlySpan<byte> Grab();
 }
