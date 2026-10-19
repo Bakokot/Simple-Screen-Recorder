@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,8 +14,18 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using System.Diagnostics;
+
 namespace ScreenCapture;
 
-public partial class App : System.Windows.Application
+/// <summary>One audio source recorded to a WAV file in parallel with the video.</summary>
+public interface IAudioTrack : IDisposable
 {
+    string FilePath { get; }
+    /// <summary>Time, on the recording clock, at which capture started.</summary>
+    TimeSpan StartedAt { get; }
+    bool HasData { get; }
+    Exception? Error { get; }
+    void Start(Stopwatch clock);
+    Task StopAsync();
 }

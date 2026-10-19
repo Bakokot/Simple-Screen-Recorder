@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,41 +14,36 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using Avalonia.Media.Imaging;
 
 namespace ScreenCapture;
 
 /// <summary>A row of the "Only selected apps" list.</summary>
-internal sealed class AudioAppEntry
+public sealed class AudioAppEntry
 {
     public required string Exe { get; init; }
     public required string Name { get; init; }
-    public ImageSource? Icon { get; init; }
+    public Bitmap? Icon { get; init; }
     public bool Running { get; init; }
     public bool Selected { get; set; }
     public string Status => Running ? "" : "not running";
 
-    public static AudioAppEntry From(AudioApp app, bool running, bool selected) => new()
+    public static AudioAppEntry From(IPlatform platform, AudioApp app, bool running, bool selected) => new()
     {
         Exe = app.Exe,
         Name = app.Name,
-        Icon = app.ExePath != null ? LoadIcon(app.ExePath) : null,
+        Icon = LoadIcon(platform.AppIconPng(app)),
         Running = running,
         Selected = selected,
     };
 
-    private static ImageSource? LoadIcon(string path)
+    private static Bitmap? LoadIcon(byte[]? png)
     {
+        if (png == null) return null;
         try
         {
-            using var icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
-            if (icon == null) return null;
-            var image = Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-            image.Freeze();
-            return image;
+            using var stream = new MemoryStream(png);
+            return new Bitmap(stream);
         }
         catch
         {

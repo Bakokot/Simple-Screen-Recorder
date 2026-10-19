@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,7 @@ using System.Text.Json;
 
 namespace ScreenCapture;
 
-internal sealed class AppSettings
+public sealed class AppSettings
 {
     public OutputFormat Format { get; set; } = OutputFormat.Mp4;
     public VideoQuality Quality { get; set; } = VideoQuality.High;

@@ -1,0 +1,317 @@
+<!--
+    Screen Capture: a lightweight screen recorder.
+    Copyright (C) 2026 Bakou
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+<!-- Mica and the content drawn into the title bar only exist on Windows 11; elsewhere the window keeps its
+     system title bar and a plain background (see MainWindow.OnPropertyChanged). -->
+<Window x:Class="ScreenCapture.MainWindow"
+        xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:ScreenCapture"
+        xmlns:ic="using:FluentIcons.Avalonia"
+        Title="Screen Capture"
+        Icon="/app.ico"
+        Width="460"
+        SizeToContent="Height"
+        MinWidth="460"
+        MinHeight="320"
+        WindowStartupLocation="CenterScreen"
+        TransparencyLevelHint="Mica"
+        ExtendClientAreaToDecorationsHint="True"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.Styles>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16,12,16,16" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+
+        <Style Selector="TextBlock.cardTitle">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+
+        <Style Selector="TextBlock.caption">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="2,0,0,4" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+
+        <Style Selector="TextBlock.hint">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+        </Style>
+
+        <Style Selector="Border.keyCap">
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrongStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1,1,1,2" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="6,1" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+        </Style>
+
+        <Style Selector="Button.tile">
+            <Setter Property="Height" Value="72" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style Selector="Button.icon">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="8,0" />
+        </Style>
+
+        <Style Selector="Button.subtle">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style Selector="ComboBox">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+
+        <!-- The label sits next to the switch, as in Windows settings. -->
+        <Style Selector="ToggleSwitch">
+            <Setter Property="OnContent" Value="{Binding $self.Content}" />
+            <Setter Property="OffContent" Value="{Binding $self.Content}" />
+        </Style>
+        <Style Selector="ToggleSwitch /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+
+        <!-- Big round record button: red dot when idle, red rounded square while recording. -->
+        <Style Selector="Button.record">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Grid Width="84" Height="84" Background="Transparent">
+                        <Ellipse Name="Ring" StrokeThickness="3" Stroke="{DynamicResource ControlStrongStrokeColorDefaultBrush}" />
+                        <ContentPresenter Name="Dot" Content="{TemplateBinding Content}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="Button.record:pointerover /template/ Ellipse#Ring">
+            <Setter Property="Stroke" Value="{StaticResource RecordRed}" />
+        </Style>
+        <Style Selector="Button.record:disabled">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+
+        <Style Selector="TextBlock#TimerText">
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+        <Style Selector="TextBlock#TimerText.recording">
+            <Setter Property="Foreground" Value="{StaticResource RecordRed}" />
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,*">
+        <!-- Title drawn in the system title bar; clicks go through to it so the window can be dragged. -->
+        <StackPanel x:Name="TitleBar" Grid.Row="0" Orientation="Horizontal" Margin="12,0,0,0" Height="32"
+                    IsHitTestVisible="False" IsVisible="False">
+            <Image Source="/app.ico" Width="16" Height="16" VerticalAlignment="Center" />
+            <TextBlock Text="Screen Capture" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Scrolls only when the content does not fit, even at the smallest scale. -->
+        <ScrollViewer x:Name="ContentScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <!-- Scaled up with the window; wide windows put the cards in two columns (see MainWindow.UpdateLayoutMode). -->
+        <LayoutTransformControl x:Name="UiScale" VerticalAlignment="Center">
+        <Grid x:Name="LayoutRoot" Margin="16,4,16,12" ColumnDefinitions="*,0,0" RowDefinitions="Auto,Auto">
+            <StackPanel x:Name="LeftColumn" Grid.Column="0">
+
+            <!-- Capture zone -->
+            <Border x:Name="CaptureCard" Classes="card">
+                <StackPanel>
+                    <TextBlock Classes="cardTitle" Text="Capture" />
+                    <Grid ColumnDefinitions="*,10,*">
+                        <Button x:Name="RegionTile" Grid.Column="0" Classes="tile" Click="RegionTile_Click"
+                                ToolTip.Tip="Draw the zone to record">
+                            <StackPanel>
+                                <ic:SymbolIcon Symbol="Crop" FontSize="22" HorizontalAlignment="Center" />
+                                <TextBlock Text="Region" Margin="0,6,0,0" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="ScreenTile" Grid.Column="2" Classes="tile" Click="ScreenTile_Click"
+                                ToolTip.Tip="Record a whole screen">
+                            <StackPanel>
+                                <ic:SymbolIcon Symbol="Desktop" FontSize="22" HorizontalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" HorizontalAlignment="Center">
+                                    <TextBlock Text="Screen" />
+                                    <ic:SymbolIcon x:Name="ScreenChevron" Symbol="ChevronDown" FontSize="10" Margin="5,2,0,0" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Margin="2,12,0,0">
+                        <ic:SymbolIcon x:Name="ZoneIcon" Symbol="Checkmark" FontSize="14" Margin="0,0,6,0"
+                                       Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
+                        <TextBlock x:Name="ZoneLabel" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Video -->
+            <Border x:Name="VideoCard" Classes="card">
+                <StackPanel>
+                    <TextBlock Classes="cardTitle" Text="Video" />
+                    <Grid ColumnDefinitions="1.8*,8,*,8,*">
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Classes="caption" Text="Format" />
+                            <ComboBox x:Name="FormatBox" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Classes="caption" Text="Quality" />
+                            <ComboBox x:Name="QualityBox" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Classes="caption" Text="Frame rate" />
+                            <ComboBox x:Name="FpsBox" />
+                        </StackPanel>
+                    </Grid>
+
+                    <ToggleSwitch x:Name="CursorSwitch" Content="Show mouse cursor" Margin="0,10,0,0" />
+                    <ToggleSwitch x:Name="BorderSwitch" Content="Red frame around the zone while recording"
+                                  ToolTip.Tip="Turn off when recording a game: a window above it can lower its frame rate" />
+
+                    <TextBlock Classes="caption" Text="Save to" Margin="2,10,0,4" />
+                    <Grid ColumnDefinitions="*,Auto,Auto">
+                        <TextBox x:Name="FolderBox" Grid.Column="0" />
+                        <Button x:Name="BrowseButton" Grid.Column="1" Classes="icon" Margin="8,0,0,0" Click="Browse_Click"
+                                ToolTip.Tip="Choose folder">
+                            <ic:SymbolIcon Symbol="Folder" FontSize="16" />
+                        </Button>
+                        <Button Grid.Column="2" Classes="icon" Margin="6,0,0,0" Click="OpenFolder_Click" ToolTip.Tip="Open folder">
+                            <ic:SymbolIcon Symbol="FolderOpen" FontSize="16" />
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Sound -->
+            <Border x:Name="SoundCard" Classes="card">
+                <StackPanel>
+                    <TextBlock Classes="cardTitle" Text="Sound" />
+                    <Grid ColumnDefinitions="170,*" RowDefinitions="Auto,Auto,10,Auto">
+                        <ToggleSwitch x:Name="SysAudioSwitch" Grid.Row="0" Grid.Column="0" Content="System sound" />
+                        <ComboBox x:Name="SysDeviceBox" Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" />
+
+                        <!-- Which apps' sound to record -->
+                        <StackPanel x:Name="AppsPanel" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,6,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="AllAppsRadio" Content="All apps" GroupName="AppAudio" Margin="0,0,16,0" />
+                                <RadioButton x:Name="OnlyAppsRadio" Content="Only selected apps" GroupName="AppAudio" />
+                            </StackPanel>
+                            <Border x:Name="AppsListBorder" Margin="0,8,0,0" CornerRadius="6" BorderThickness="1"
+                                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                    Background="{DynamicResource ControlFillColorDefaultBrush}">
+                                <Grid RowDefinitions="Auto,Auto">
+                                    <Grid Grid.Row="0" Margin="12,4,4,2">
+                                        <TextBlock Text="Apps playing sound" FontSize="12" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <Button HorizontalAlignment="Right" Classes="subtle" Padding="6,4"
+                                                ToolTip.Tip="Refresh the list" Click="RefreshApps_Click">
+                                            <ic:SymbolIcon Symbol="ArrowSync" FontSize="14" />
+                                        </Button>
+                                    </Grid>
+                                    <ScrollViewer Grid.Row="1" MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Margin="12,0,12,8">
+                                            <ItemsControl x:Name="AppsList">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:AudioAppEntry">
+                                                        <CheckBox IsChecked="{Binding Selected}" Margin="0,2">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                                                <TextBlock Text="{Binding Status}" Margin="8,0,0,0" FontSize="12" VerticalAlignment="Center"
+                                                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                            </StackPanel>
+                                                        </CheckBox>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock x:Name="NoAppsText" Classes="hint" Margin="0,4,0,4"
+                                                       Text="No app is playing sound right now. Start playing something, then refresh." />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="AppsHint" Classes="hint" Margin="2,6,0,0"
+                                       Text="Selected apps must be running when recording starts." />
+                        </StackPanel>
+
+                        <ToggleSwitch x:Name="MicSwitch" Grid.Row="3" Grid.Column="0" Content="Microphone" />
+                        <ComboBox x:Name="MicDeviceBox" Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" />
+                    </Grid>
+                    <TextBlock x:Name="SoundHint" Classes="hint" Margin="2,10,0,0" IsVisible="False" />
+                </StackPanel>
+            </Border>
+
+            <!-- Record -->
+            <StackPanel x:Name="RecordPanel" Margin="0,10,0,0" HorizontalAlignment="Center">
+                <Button x:Name="RecordButton" Classes="record" HorizontalAlignment="Center" Click="Record_Click" ToolTip.Tip="Start recording">
+                    <Border x:Name="RecordDot" Width="60" Height="60" CornerRadius="30" Background="{StaticResource RecordRed}" />
+                </Button>
+                <TextBlock x:Name="TimerText" Text="00:00:00" Margin="0,10,0,0" HorizontalAlignment="Center"
+                           FontSize="22" FontWeight="SemiBold" FontFamily="Segoe UI Variable Display, Segoe UI, Cantarell, Ubuntu, sans-serif" />
+                <TextBlock x:Name="StatusText" Text="Ready" Margin="0,2,0,0" HorizontalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" MaxWidth="400"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+            </StackPanel>
+            <StackPanel x:Name="RightColumn" Grid.Column="2" IsVisible="False" />
+
+            <!-- Footer -->
+            <Grid Grid.Row="1" Grid.ColumnSpan="3" Margin="0,14,0,0" ColumnDefinitions="*,Auto">
+                <StackPanel x:Name="HotkeyHint" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
+                            ToolTip.Tip="Global shortcut to start / stop">
+                    <Border Classes="keyCap"><TextBlock Text="Ctrl" FontSize="11" /></Border>
+                    <Border Classes="keyCap"><TextBlock Text="Shift" FontSize="11" /></Border>
+                    <Border Classes="keyCap"><TextBlock Text="F9" FontSize="11" /></Border>
+                    <TextBlock Text="start / stop" Margin="4,0,0,0" FontSize="12" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="OpenFileButton" Classes="subtle" IsVisible="False" Click="OpenFile_Click" Margin="0,0,4,0">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <ic:SymbolIcon Symbol="Play" FontSize="16" />
+                            <TextBlock Text="Open video" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="subtle" Click="OpenFolder_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <ic:SymbolIcon Symbol="FolderOpen" FontSize="16" />
+                            <TextBlock Text="Folder" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Grid>
+        </LayoutTransformControl>
+        </ScrollViewer>
+    </Grid>
+</Window>

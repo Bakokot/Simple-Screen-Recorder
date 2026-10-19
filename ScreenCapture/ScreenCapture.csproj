@@ -1,37 +1,37 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- The app: Avalonia interface on top of ScreenCapture.Core and the platform backend.
+       net9.0-windows is the Windows app; net9.0 builds the same interface for Linux, which has no backend yet. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFrameworks>net9.0-windows;net9.0</TargetFrameworks>
     <Nullable>enable</Nullable>
-    <UseWPF>true</UseWPF>
-    <!-- Still used for the zone selector / recording border overlays and for Screen enumeration. -->
-    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- WPF owns startup, so DPI awareness lives in the manifest, not in WinForms ApplicationHighDpiMode. -->
-    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyName>ScreenCapture</AssemblyName>
     <Product>Screen Capture</Product>
     <Copyright>Copyright (C) 2026 Bakou. Licensed under the GNU GPL v3 or later.</Copyright>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0-windows'">
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
   <ItemGroup>
-    <!-- WPF and WinForms share many type names (Application, Button, Point, Color…): import them explicitly per file. -->
-    <Using Remove="System.Windows.Forms" />
-    <Using Remove="System.Drawing" />
-    <Using Include="System.IO" />
+    <AvaloniaResource Include="app.ico" />
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="app.ico" />
+    <ProjectReference Include="..\ScreenCapture.Core\ScreenCapture.Core.csproj" />
+    <ProjectReference Include="..\ScreenCapture.Windows\ScreenCapture.Windows.csproj" Condition="'$(TargetFramework)' == 'net9.0-windows'" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="WPF-UI" Version="4.2.1" />
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="FluentIcons.Avalonia" Version="1.1.310" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,18 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using System.Diagnostics;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Markup.Xaml;
 
 namespace ScreenCapture;
 
-/// <summary>One audio source recorded to a WAV file in parallel with the video.</summary>
-internal interface IAudioTrack : IDisposable
+public partial class App : Application
 {
-    string FilePath { get; }
-    /// <summary>Time, on the recording clock, at which capture started.</summary>
-    TimeSpan StartedAt { get; }
-    bool HasData { get; }
-    Exception? Error { get; }
-    void Start(Stopwatch clock);
-    Task StopAsync();
+    public static IPlatform Platform { get; set; } = null!;
+
+    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+
+    public override void OnFrameworkInitializationCompleted()
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            desktop.MainWindow = new MainWindow();
+        base.OnFrameworkInitializationCompleted();
+    }
 }

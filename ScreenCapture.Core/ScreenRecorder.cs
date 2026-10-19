@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -18,58 +18,41 @@ using System.Drawing;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using NAudio.CoreAudioApi;
-using static ScreenCapture.NativeMethods;
 
 namespace ScreenCapture;
 
-internal sealed class RecordingOptions
+public sealed class RecordingOptions
 {
     public required Rectangle Region { get; init; }
     public required OutputFormat Format { get; init; }
     public required VideoQuality Quality { get; init; }
     public required int Fps { get; init; }
     public required bool ShowCursor { get; init; }
-    /// <summary>Render endpoint to capture (loopback), or null for no system sound.</summary>
-    public MMDevice? SystemAudioDevice { get; init; }
-    /// <summary>Processes whose sound is recorded instead of the whole output device (each with its child processes).</summary>
-    public IReadOnlyList<int> AppProcessIds { get; init; } = [];
-    /// <summary>Capture endpoint (microphone), or null for no microphone.</summary>
-    public MMDevice? MicrophoneDevice { get; init; }
+    /// <summary>Sounds recorded with the video, mixed together (ignored for formats without sound).</summary>
+    public IReadOnlyList<AudioSource> AudioSources { get; init; } = [];
     public required string OutputPath { get; init; }
     public required string FfmpegPath { get; init; }
 }
 
 /// <summary>
-/// Records a screen zone into a temporary video while WASAPI records audio in parallel, then muxes
+/// Records a screen zone into a temporary video while the sound is recorded in parallel, then muxes
 /// everything into the requested format.
 /// </summary>
 /// <remarks>
-/// Video is preferably captured by FFmpeg itself with Desktop Duplication (ddagrab) and encoded on the
-/// GPU with NVENC: frames never leave video memory, so a game keeps its frame rate. When that is not
-/// possible (zone spanning several screens, rotated screen, no NVIDIA GPU…) it falls back to software
-/// encoding, and as a last resort to GDI capture piped to FFmpeg.
+/// The platform offers capture pipelines, best first (on Windows: GPU capture and encoding, then software
+/// encoding, then frames grabbed by the app); the first one that starts is used.
 /// </remarks>
-internal sealed class ScreenRecorder : IDisposable
+public sealed class ScreenRecorder : IDisposable
 {
-    private enum Pipeline { GpuNvenc, GpuX264, Gdi }
-
-    /// <summary>Adapters on which NVENC could not encode the captured frames (e.g. laptop iGPU screens).</summary>
-    private static readonly HashSet<int> NvencFailed = [];
-
-    // ddagrab tags its frames as full-range RGB and encoders copy that into the file, but they convert to
-    // limited-range BT.601 YUV; tag the video with what it really is so players show the right colors.
-    private const string ColorTags = "setparams=range=tv:colorspace=smpte170m:color_primaries=bt709:color_trc=bt709";
-
+    private readonly IPlatform _platform;
     private readonly RecordingOptions _o;
     private readonly Rectangle _region;
-    private readonly DxgiOutput? _output;
     private readonly string _tempDir;
     private readonly string _tempVideo;
     private readonly Stopwatch _clock = new();
     private readonly StringBuilder _ffmpegLog = new();
     private readonly List<IAudioTrack> _audio = [];
-    private Pipeline _pipeline;
+    private VideoPipeline? _pipeline;
     private Process? _encoder;
     private Thread? _captureThread;
     private volatile bool _stopRequested;
@@ -80,13 +63,13 @@ internal sealed class ScreenRecorder : IDisposable
 
     public TimeSpan Elapsed => _clock.IsRunning ? _clock.Elapsed - _videoStartedAt : TimeSpan.Zero;
 
-    public ScreenRecorder(RecordingOptions options)
+    public ScreenRecorder(IPlatform platform, RecordingOptions options)
     {
+        _platform = platform;
         _o = options;
         // yuv420p needs even dimensions.
         _region = new Rectangle(options.Region.X, options.Region.Y, options.Region.Width & ~1, options.Region.Height & ~1);
         if (_region.Width < 16 || _region.Height < 16) throw new ArgumentException("The capture zone is too small.");
-        _output = DxgiOutputs.Containing(_region);
 
         _tempDir = Path.Combine(Path.GetTempPath(), "ScreenCapture", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDir);
@@ -101,27 +84,35 @@ internal sealed class ScreenRecorder : IDisposable
         {
             if (FormatInfo.SupportsAudio(_o.Format))
             {
-                if (_o.SystemAudioDevice != null)
-                    _audio.Add(new AudioRecorder(_o.SystemAudioDevice, loopback: true, Path.Combine(_tempDir, "system.wav")));
-                foreach (var pid in _o.AppProcessIds)
-                    _audio.Add(new AppAudioRecorder(pid, Path.Combine(_tempDir, $"app-{pid}.wav")));
-                if (_o.MicrophoneDevice != null)
-                    _audio.Add(new AudioRecorder(_o.MicrophoneDevice, loopback: false, Path.Combine(_tempDir, "mic.wav")));
+                foreach (var source in _o.AudioSources)
+                {
+                    var name = source switch
+                    {
+                        SystemSound => "system",
+                        AppSound app => $"app-{app.ProcessId}",
+                        _ => "mic",
+                    };
+                    _audio.Add(_platform.CreateAudioTrack(source, Path.Combine(_tempDir, $"{name}.wav")));
+                }
             }
             // Audio starts before the first video frame; the lead-in is cut when muxing.
             foreach (var a in _audio) a.Start(_clock);
 
-            foreach (var pipeline in Pipelines())
+            foreach (var pipeline in _platform.VideoPipelines(_o, _region))
             {
                 _pipeline = pipeline;
-                if (pipeline == Pipeline.Gdi)
+                switch (pipeline)
                 {
-                    StartGdi();
-                    return;
+                    case FrameGrabberPipeline frames:
+                        StartFrameGrabber(frames);
+                        return;
+                    case FfmpegGrabPipeline grab:
+                        if (await TryStartFfmpegGrabAsync(grab)) return;
+                        grab.OnFailed?.Invoke();
+                        break;
                 }
-                if (await TryStartGpuAsync()) return;
-                if (pipeline == Pipeline.GpuNvenc) lock (NvencFailed) NvencFailed.Add(_output!.AdapterIndex);
             }
+            throw new InvalidOperationException("The screen could not be captured.\n\n" + Log());
         }
         catch
         {
@@ -130,24 +121,11 @@ internal sealed class ScreenRecorder : IDisposable
         }
     }
 
-    private IEnumerable<Pipeline> Pipelines()
-    {
-        if (_output != null)
-        {
-            bool nvenc;
-            lock (NvencFailed) nvenc = !NvencFailed.Contains(_output.AdapterIndex);
-            // NVENC refuses frames smaller than about 145 × 49.
-            if (nvenc && _region.Width >= 160 && _region.Height >= 96) yield return Pipeline.GpuNvenc;
-            yield return Pipeline.GpuX264;
-        }
-        yield return Pipeline.Gdi;
-    }
-
     /// <summary>Stops recording and produces the final file. Returns the output path.</summary>
     public async Task<string> StopAsync(IProgress<string> status)
     {
         _stopRequested = true;
-        if (_pipeline == Pipeline.Gdi)
+        if (_pipeline is FrameGrabberPipeline)
         {
             await Task.Run(() => _captureThread?.Join());
         }
@@ -168,7 +146,7 @@ internal sealed class ScreenRecorder : IDisposable
         await _encoder!.WaitForExitAsync();
         if (_encoder.ExitCode != 0 || Interlocked.Read(ref _framesWritten) == 0)
             throw new InvalidOperationException("Video encoding failed.\n\n" + Log(), _captureError);
-        if (_pipeline == Pipeline.Gdi) _videoDuration = TimeSpan.FromSeconds((double)_framesWritten / _o.Fps);
+        if (_pipeline is FrameGrabberPipeline) _videoDuration = TimeSpan.FromSeconds((double)_framesWritten / _o.Fps);
 
         status.Report(FormatInfo.IsH264(_o.Format) ? "Saving file…" : $"Converting to {_o.Format.ToString().ToUpperInvariant()}…");
         var mux = StartFfmpeg(MuxArguments(), redirectInput: false);
@@ -184,15 +162,19 @@ internal sealed class ScreenRecorder : IDisposable
         lock (_ffmpegLog) return _ffmpegLog.ToString().Trim();
     }
 
-    // ---------------------------------------------------------------- GPU capture (FFmpeg ddagrab)
+    // ---------------------------------------------------------------- capture by FFmpeg
 
     /// <summary>Launches FFmpeg grabbing the screen itself; false if it could not start capturing.</summary>
-    private async Task<bool> TryStartGpuAsync()
+    private async Task<bool> TryStartFfmpegGrabAsync(FfmpegGrabPipeline pipeline)
     {
         lock (_ffmpegLog) _ffmpegLog.Clear();
         var firstFrame = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var progress = new ProgressParser(this, firstFrame);
-        var encoder = StartFfmpeg(GpuEncoderArguments(), redirectInput: true, progress.OnLine);
+        var args = new List<string> { "-hide_banner", "-loglevel", "error", "-nostats", "-y" };
+        args.AddRange(pipeline.Arguments);
+        // Screen grabbers may skip frames while the screen does not change; editors prefer a constant frame rate.
+        args.AddRange(["-fps_mode", "cfr", "-progress", "pipe:1", "-stats_period", "0.1", _tempVideo]);
+        var encoder = StartFfmpeg(args, redirectInput: true, progress.OnLine);
 
         var started = await Task.WhenAny(firstFrame.Task, encoder.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(10)));
         if (started == firstFrame.Task)
@@ -201,51 +183,10 @@ internal sealed class ScreenRecorder : IDisposable
             return true;
         }
 
-        Debug.WriteLine($"{_pipeline} capture failed, falling back:\n{Log()}");
+        Debug.WriteLine($"{pipeline.Name} capture failed, falling back:\n{Log()}");
         try { if (!encoder.HasExited) encoder.Kill(); } catch { }
         encoder.Dispose();
         return false;
-    }
-
-    private List<string> GpuEncoderArguments()
-    {
-        var inv = CultureInfo.InvariantCulture;
-        var o = _output!;
-        var args = new List<string> { "-hide_banner", "-loglevel", "error", "-nostats", "-y" };
-        // ddagrab uses the default adapter unless given a device: the screen may be plugged into another GPU.
-        if (o.AdapterIndex != 0)
-            args.AddRange(["-init_hw_device", $"d3d11va=dx:{o.AdapterIndex}", "-filter_hw_device", "dx"]);
-
-        var grab = string.Create(inv,
-            $"ddagrab=output_idx={o.OutputIndex}:framerate={_o.Fps}:video_size={_region.Width}x{_region.Height}" +
-            $":offset_x={_region.X - o.Bounds.X}:offset_y={_region.Y - o.Bounds.Y}:draw_mouse={(_o.ShowCursor ? 1 : 0)}");
-        bool lossless = _o.Quality == VideoQuality.Lossless;
-
-        if (_pipeline == Pipeline.GpuNvenc)
-        {
-            args.AddRange(["-filter_complex", $"{grab},{ColorTags}", "-c:v", "h264_nvenc"]);
-            if (lossless)
-                args.AddRange(["-preset", "p4", "-tune", "lossless", "-rgb_mode", "yuv444"]);
-            else
-            {
-                // WebM / GIF are transcoded after recording: keep a high-quality intermediate.
-                var cq = FormatInfo.IsH264(_o.Format) ? FormatInfo.NvencCq(_o.Quality) : 12;
-                args.AddRange(["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", cq.ToString(inv), "-b:v", "0"]);
-            }
-            // No B-frames and no output delay: the progress reports then tell when capture began (see ProgressParser).
-            args.AddRange(["-bf", "0", "-delay", "0"]);
-        }
-        else
-        {
-            args.AddRange(["-filter_complex", $"{grab},hwdownload,format=bgra,setparams=color_primaries=bt709:color_trc=bt709"]);
-            args.AddRange(X264Arguments());
-            if (!lossless) args.AddRange(["-colorspace", "smpte170m"]);
-            args.AddRange(["-tune", "zerolatency"]);
-        }
-
-        // ddagrab skips frames while the screen does not change; editors prefer a constant frame rate.
-        args.AddRange(["-fps_mode", "cfr", "-progress", "pipe:1", "-stats_period", "0.1", _tempVideo]);
-        return args;
     }
 
     /// <summary>Reads FFmpeg's -progress reports: frame count, encoded duration, and when the first frame came.</summary>
@@ -285,39 +226,21 @@ internal sealed class ScreenRecorder : IDisposable
         }
     }
 
-    // ---------------------------------------------------------------- GDI capture (fallback)
+    // ---------------------------------------------------------------- capture by the app (fallback)
 
-    private void StartGdi()
+    private void StartFrameGrabber(FrameGrabberPipeline pipeline)
     {
         lock (_ffmpegLog) _ffmpegLog.Clear();
-        _encoder = StartFfmpeg(GdiEncoderArguments(), redirectInput: true);
-        _captureThread = new Thread(CaptureLoop) { IsBackground = true, Name = "Screen capture" };
+        _encoder = StartFfmpeg(RawFramesEncoderArguments(), redirectInput: true);
+        _captureThread = new Thread(() => CaptureLoop(pipeline)) { IsBackground = true, Name = "Screen capture" };
         _captureThread.Start();
     }
 
-    private void CaptureLoop()
+    private void CaptureLoop(FrameGrabberPipeline pipeline)
     {
-        int w = _region.Width, h = _region.Height, frameBytes = w * h * 4;
-        IntPtr screenDc = IntPtr.Zero, memDc = IntPtr.Zero, dib = IntPtr.Zero, oldObj = IntPtr.Zero;
-        IntPtr lastCursor = IntPtr.Zero;
-        int hotX = 0, hotY = 0;
-        timeBeginPeriod(1);
         try
         {
-            screenDc = GetDC(IntPtr.Zero);
-            memDc = CreateCompatibleDC(screenDc);
-            var header = new BITMAPINFOHEADER
-            {
-                biSize = System.Runtime.InteropServices.Marshal.SizeOf<BITMAPINFOHEADER>(),
-                biWidth = w,
-                biHeight = -h, // top-down rows, as FFmpeg expects
-                biPlanes = 1,
-                biBitCount = 32,
-            };
-            dib = CreateDIBSection(memDc, ref header, 0, out var bits, IntPtr.Zero, 0);
-            if (dib == IntPtr.Zero) throw new InvalidOperationException("Could not allocate the capture buffer.");
-            oldObj = SelectObject(memDc, dib);
-
+            using var grabber = pipeline.CreateGrabber();
             var stdin = _encoder!.StandardInput.BaseStream;
             double frameMs = 1000.0 / _o.Fps;
             _videoStartedAt = _clock.Elapsed;
@@ -325,39 +248,16 @@ internal sealed class ScreenRecorder : IDisposable
 
             while (!_stopRequested)
             {
-                BitBlt(memDc, 0, 0, w, h, screenDc, _region.X, _region.Y, SRCCOPY);
-
-                if (_o.ShowCursor)
-                {
-                    var ci = new CURSORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<CURSORINFO>() };
-                    if (GetCursorInfo(ref ci) && (ci.flags & CURSOR_SHOWING) != 0 && ci.hCursor != IntPtr.Zero)
-                    {
-                        if (ci.hCursor != lastCursor && GetIconInfo(ci.hCursor, out var ii))
-                        {
-                            lastCursor = ci.hCursor;
-                            hotX = ii.xHotspot;
-                            hotY = ii.yHotspot;
-                            if (ii.hbmMask != IntPtr.Zero) DeleteObject(ii.hbmMask);
-                            if (ii.hbmColor != IntPtr.Zero) DeleteObject(ii.hbmColor);
-                        }
-                        DrawIconEx(memDc, ci.ptScreenPos.X - hotX - _region.X, ci.ptScreenPos.Y - hotY - _region.Y,
-                            ci.hCursor, 0, 0, 0, IntPtr.Zero, DI_NORMAL);
-                    }
-                }
-                GdiFlush();
+                var frame = grabber.Grab();
 
                 // Keep a constant frame rate tied to wall-clock time: if capture or encoding fell behind,
                 // repeat the frame so the video duration matches reality (and stays in sync with audio).
                 long due = (long)(sw.Elapsed.TotalMilliseconds / frameMs) + 1;
                 if (due <= _framesWritten) due = _framesWritten + 1;
-                unsafe
+                while (_framesWritten < due)
                 {
-                    var frame = new ReadOnlySpan<byte>((void*)bits, frameBytes);
-                    while (_framesWritten < due)
-                    {
-                        stdin.Write(frame);
-                        _framesWritten++;
-                    }
+                    stdin.Write(frame);
+                    _framesWritten++;
                 }
 
                 var wait = _framesWritten * frameMs - sw.Elapsed.TotalMilliseconds;
@@ -368,19 +268,11 @@ internal sealed class ScreenRecorder : IDisposable
         {
             _captureError = ex;
         }
-        finally
-        {
-            timeEndPeriod(1);
-            if (oldObj != IntPtr.Zero) SelectObject(memDc, oldObj);
-            if (dib != IntPtr.Zero) DeleteObject(dib);
-            if (memDc != IntPtr.Zero) DeleteDC(memDc);
-            if (screenDc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDc);
-        }
     }
 
     // ---------------------------------------------------------------- ffmpeg
 
-    private List<string> GdiEncoderArguments()
+    private List<string> RawFramesEncoderArguments()
     {
         var args = new List<string>
         {
@@ -390,31 +282,8 @@ internal sealed class ScreenRecorder : IDisposable
             "-framerate", _o.Fps.ToString(CultureInfo.InvariantCulture),
             "-i", "-",
         };
-        args.AddRange(X264Arguments());
+        args.AddRange(EncoderArguments.X264(_o, _region));
         args.Add(_tempVideo);
-        return args;
-    }
-
-    private List<string> X264Arguments()
-    {
-        var args = new List<string> { "-c:v", "libx264" };
-        if (_o.Quality == VideoQuality.Lossless)
-        {
-            args.AddRange(["-preset", "ultrafast", "-qp", "0", "-pix_fmt", "yuv444p"]);
-        }
-        else if (FormatInfo.IsH264(_o.Format))
-        {
-            // Final encode, done in real time.
-            bool heavy = _o.Fps > 30 || (long)_region.Width * _region.Height > 1920L * 1080;
-            args.AddRange(["-preset", heavy ? "superfast" : "veryfast",
-                           "-crf", FormatInfo.X264Crf(_o.Quality).ToString(CultureInfo.InvariantCulture),
-                           "-pix_fmt", "yuv420p"]);
-        }
-        else
-        {
-            // High-quality intermediate, transcoded to WebM/GIF after recording.
-            args.AddRange(["-preset", "ultrafast", "-crf", "8", "-pix_fmt", "yuv420p"]);
-        }
         return args;
     }
 
@@ -506,5 +375,33 @@ internal sealed class ScreenRecorder : IDisposable
         foreach (var a in _audio) a.Dispose();
         _audio.Clear();
         try { Directory.Delete(_tempDir, recursive: true); } catch { /* best effort */ }
+    }
+}
+
+/// <summary>FFmpeg encoder options shared by the capture pipelines.</summary>
+public static class EncoderArguments
+{
+    /// <summary>libx264 options for the temporary video, from the quality and the load of the capture.</summary>
+    public static List<string> X264(RecordingOptions o, Rectangle region)
+    {
+        var args = new List<string> { "-c:v", "libx264" };
+        if (o.Quality == VideoQuality.Lossless)
+        {
+            args.AddRange(["-preset", "ultrafast", "-qp", "0", "-pix_fmt", "yuv444p"]);
+        }
+        else if (FormatInfo.IsH264(o.Format))
+        {
+            // Final encode, done in real time.
+            bool heavy = o.Fps > 30 || (long)region.Width * region.Height > 1920L * 1080;
+            args.AddRange(["-preset", heavy ? "superfast" : "veryfast",
+                           "-crf", FormatInfo.X264Crf(o.Quality).ToString(CultureInfo.InvariantCulture),
+                           "-pix_fmt", "yuv420p"]);
+        }
+        else
+        {
+            // High-quality intermediate, transcoded to WebM/GIF after recording.
+            args.AddRange(["-preset", "ultrafast", "-crf", "8", "-pix_fmt", "yuv420p"]);
+        }
+        return args;
     }
 }

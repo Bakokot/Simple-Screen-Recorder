@@ -1,0 +1,57 @@
+<!--
+    Screen Capture: a lightweight screen recorder.
+    Copyright (C) 2026 Bakou
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+<!-- RequestedThemeVariant="Default" follows the system light / dark setting, live. -->
+<Application x:Class="ScreenCapture.App"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             RequestedThemeVariant="Default">
+    <Application.Styles>
+        <FluentTheme />
+    </Application.Styles>
+
+    <!-- Windows 11 (WinUI) palette, so the app looks the same with or without Mica. -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+                    <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#E4000000" />
+                    <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#9E000000" />
+                    <SolidColorBrush x:Key="TextFillColorTertiaryBrush" Color="#72000000" />
+                    <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#B3FFFFFF" />
+                    <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#0F000000" />
+                    <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#B3FFFFFF" />
+                    <SolidColorBrush x:Key="ControlStrongStrokeColorDefaultBrush" Color="#72000000" />
+                    <SolidColorBrush x:Key="SystemFillColorSuccessBrush" Color="#0F7B0F" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#C5FFFFFF" />
+                    <SolidColorBrush x:Key="TextFillColorTertiaryBrush" Color="#87FFFFFF" />
+                    <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#0DFFFFFF" />
+                    <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#19000000" />
+                    <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#0FFFFFFF" />
+                    <SolidColorBrush x:Key="ControlStrongStrokeColorDefaultBrush" Color="#8BFFFFFF" />
+                    <SolidColorBrush x:Key="SystemFillColorSuccessBrush" Color="#6CCB5F" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <SolidColorBrush x:Key="RecordRed" Color="#E5484D" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -32,9 +32,8 @@ internal static class NativeMethods
 
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
-    public const int WM_HOTKEY = 0x0312;
+    public const uint WM_HOTKEY = 0x0312;
     public const int WM_DPICHANGED = 0x02E0;
-    public const int WM_SIZING = 0x0214;
     public const uint MOD_ALT = 0x1;
     public const uint MOD_CONTROL = 0x2;
     public const uint MOD_SHIFT = 0x4;
@@ -106,6 +105,26 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    public const uint VK_F9 = 0x78;
+    public const uint WM_QUIT = 0x0012;
+    public const uint PM_NOREMOVE = 0x0000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+    }
+
+    [DllImport("user32.dll")] public static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+    [DllImport("user32.dll")] public static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
+    [DllImport("user32.dll")] public static extern bool PostThreadMessage(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 
     public const uint TH32CS_SNAPPROCESS = 0x2;
     public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;

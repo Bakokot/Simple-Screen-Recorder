@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Recording logic shared by every operating system: settings, formats, FFmpeg orchestration and muxing.
+       Everything that touches the OS goes through IPlatform. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ScreenCapture</RootNamespace>
+  </PropertyGroup>
+
+</Project>

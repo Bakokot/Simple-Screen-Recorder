@@ -57,12 +57,22 @@ barely touches its frame rate.
 
 ```
 git clone https://github.com/<your-account>/screen_video_capture.git
-cd screen_video_capture/ScreenCapture
+cd screen_video_capture
 dotnet build -c Release
 ```
 
 Then run `ScreenCapture/bin/Release/net9.0-windows/ScreenCapture.exe`.
 Building needs the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
+
+The code is split so that Linux support can be added later:
+
+| Project | Contents |
+|---|---|
+| `ScreenCapture.Core` | Everything that does not depend on the operating system: settings, formats, FFmpeg recording and muxing, and the `IPlatform` interface |
+| `ScreenCapture.Windows` | The Windows implementation of `IPlatform`: capture, sound, region selector, red frame, global shortcut |
+| `ScreenCapture` | The interface (Avalonia), built for Windows (`net9.0-windows`) and for other systems (`net9.0`) |
+
+The `net9.0` build compiles but does not run yet: there is no Linux implementation of `IPlatform` so far.
 
 ## How to use
 
@@ -83,7 +93,7 @@ can keep it from presenting directly to the screen and lower its frame rate.
 | Video encoding | FFmpeg: `h264_nvenc` on NVIDIA GPUs, `libx264` otherwise |
 | Sound | WASAPI loopback, per-process loopback and capture, through [NAudio](https://github.com/naudio/NAudio) |
 | Final file | FFmpeg muxes video and sound, or converts to WebM / GIF |
-| Interface | WPF with [WPF UI](https://github.com/lepoco/wpfui) |
+| Interface | [Avalonia](https://avaloniaui.net/) with its Fluent theme and [Fluent UI System Icons](https://github.com/davidxuang/FluentIcons); the region selector and red frame are WinForms windows |
 
 Settings are stored in `%APPDATA%\ScreenCapture\settings.json`.
 
@@ -116,7 +126,8 @@ You should have received a copy of the GNU General Public License along with thi
 | Component | License | How it is used |
 |---|---|---|
 | [NAudio](https://github.com/naudio/NAudio) | MIT | NuGet package, included in the build |
-| [WPF UI](https://github.com/lepoco/wpfui) | MIT | NuGet package, included in the build |
+| [Avalonia](https://github.com/AvaloniaUI/Avalonia) | MIT | NuGet package, included in the build |
+| [FluentIcons](https://github.com/davidxuang/FluentIcons) | MIT | NuGet package, included in the build (icons from Microsoft's Fluent UI System Icons, MIT) |
 | [FFmpeg](https://ffmpeg.org/) | LGPL 2.1+ / GPL 2+, depending on the build | **Not included.** Installed separately by the user and run as a separate program |
 
 FFmpeg is a trademark of Fabrice Bellard. NVIDIA and NVENC are trademarks of NVIDIA Corporation.

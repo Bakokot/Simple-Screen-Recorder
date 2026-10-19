@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -19,9 +19,6 @@ using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 
 namespace ScreenCapture;
-
-/// <summary>An application identified by its executable name (e.g. "spotify"), which survives restarts.</summary>
-internal sealed record AudioApp(string Exe, string Name, string? ExePath);
 
 internal static class AudioApps
 {

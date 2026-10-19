@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -20,7 +20,7 @@ public enum OutputFormat { Mp4, Mkv, Mov, WebM, Gif }
 
 public enum VideoQuality { Low, Medium, High, Lossless }
 
-internal static class FormatInfo
+public static class FormatInfo
 {
     public static string DisplayName(OutputFormat f) => f switch
     {

@@ -1,0 +1,93 @@
+// Screen Capture: a lightweight screen recorder.
+// Copyright (C) 2026 Bakou
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+using System.Drawing;
+using System.Globalization;
+
+namespace ScreenCapture;
+
+/// <summary>
+/// Capture pipelines for Windows. Video is preferably captured by FFmpeg itself with Desktop Duplication
+/// (ddagrab) and encoded on the GPU with NVENC: frames never leave video memory, so a game keeps its frame
+/// rate. When that is not possible (zone spanning several screens, rotated screen, no NVIDIA GPU…) it falls
+/// back to software encoding, and as a last resort to GDI capture piped to FFmpeg.
+/// </summary>
+internal static class DdagrabCapture
+{
+    /// <summary>Adapters on which NVENC could not encode the captured frames (e.g. laptop iGPU screens).</summary>
+    private static readonly HashSet<int> NvencFailed = [];
+
+    // ddagrab tags its frames as full-range RGB and encoders copy that into the file, but they convert to
+    // limited-range BT.601 YUV; tag the video with what it really is so players show the right colors.
+    private const string ColorTags = "setparams=range=tv:colorspace=smpte170m:color_primaries=bt709:color_trc=bt709";
+
+    public static IEnumerable<VideoPipeline> Pipelines(RecordingOptions o, Rectangle region)
+    {
+        var output = DxgiOutputs.Containing(region);
+        if (output != null)
+        {
+            bool nvenc;
+            lock (NvencFailed) nvenc = !NvencFailed.Contains(output.AdapterIndex);
+            // NVENC refuses frames smaller than about 145 × 49.
+            if (nvenc && region.Width >= 160 && region.Height >= 96)
+            {
+                yield return new FfmpegGrabPipeline("GPU capture + NVENC", Arguments(o, region, output, nvenc: true))
+                {
+                    OnFailed = () => { lock (NvencFailed) NvencFailed.Add(output.AdapterIndex); },
+                };
+            }
+            yield return new FfmpegGrabPipeline("GPU capture + x264", Arguments(o, region, output, nvenc: false));
+        }
+        yield return new FrameGrabberPipeline("GDI capture", () => new GdiFrameGrabber(region, o.ShowCursor));
+    }
+
+    private static List<string> Arguments(RecordingOptions o, Rectangle region, DxgiOutput output, bool nvenc)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var args = new List<string>();
+        // ddagrab uses the default adapter unless given a device: the screen may be plugged into another GPU.
+        if (output.AdapterIndex != 0)
+            args.AddRange(["-init_hw_device", $"d3d11va=dx:{output.AdapterIndex}", "-filter_hw_device", "dx"]);
+
+        var grab = string.Create(inv,
+            $"ddagrab=output_idx={output.OutputIndex}:framerate={o.Fps}:video_size={region.Width}x{region.Height}" +
+            $":offset_x={region.X - output.Bounds.X}:offset_y={region.Y - output.Bounds.Y}:draw_mouse={(o.ShowCursor ? 1 : 0)}");
+        bool lossless = o.Quality == VideoQuality.Lossless;
+
+        if (nvenc)
+        {
+            args.AddRange(["-filter_complex", $"{grab},{ColorTags}", "-c:v", "h264_nvenc"]);
+            if (lossless)
+                args.AddRange(["-preset", "p4", "-tune", "lossless", "-rgb_mode", "yuv444"]);
+            else
+            {
+                // WebM / GIF are transcoded after recording: keep a high-quality intermediate.
+                var cq = FormatInfo.IsH264(o.Format) ? FormatInfo.NvencCq(o.Quality) : 12;
+                args.AddRange(["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", cq.ToString(inv), "-b:v", "0"]);
+            }
+            // No B-frames and no output delay: the progress reports then tell when capture began.
+            args.AddRange(["-bf", "0", "-delay", "0"]);
+        }
+        else
+        {
+            args.AddRange(["-filter_complex", $"{grab},hwdownload,format=bgra,setparams=color_primaries=bt709:color_trc=bt709"]);
+            args.AddRange(EncoderArguments.X264(o, region));
+            if (!lossless) args.AddRange(["-colorspace", "smpte170m"]);
+            args.AddRange(["-tune", "zerolatency"]);
+        }
+        return args;
+    }
+}

@@ -1,4 +1,4 @@
-// Screen Capture: a lightweight screen recorder for Windows.
+// Screen Capture: a lightweight screen recorder.
 // Copyright (C) 2026 Bakou
 //
 // This program is free software: you can redistribute it and/or modify
@@ -16,37 +16,42 @@
 
 namespace ScreenCapture;
 
-internal static class FfmpegLocator
+public static class FfmpegLocator
 {
     public static string? Find()
     {
+        var exe = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
         var candidates = new List<string>
         {
-            Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe"),
-            Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin", "ffmpeg.exe"),
+            Path.Combine(AppContext.BaseDirectory, exe),
+            Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin", exe),
         };
 
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
-            candidates.Add(Path.Combine(dir.Trim(), "ffmpeg.exe"));
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            candidates.Add(Path.Combine(dir.Trim(), exe));
+
+        if (!OperatingSystem.IsWindows()) return candidates.FirstOrDefault(Exists);
 
         // winget installs: the PATH of an already-running session may not include them yet.
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        candidates.Add(Path.Combine(localAppData, "Microsoft", "WinGet", "Links", "ffmpeg.exe"));
+        candidates.Add(Path.Combine(localAppData, "Microsoft", "WinGet", "Links", exe));
 
-        foreach (var c in candidates)
-        {
-            try { if (File.Exists(c)) return c; } catch { /* malformed PATH entry */ }
-        }
+        if (candidates.FirstOrDefault(Exists) is { } found) return found;
 
         var packages = Path.Combine(localAppData, "Microsoft", "WinGet", "Packages");
         if (Directory.Exists(packages))
         {
             foreach (var pkg in Directory.EnumerateDirectories(packages, "*FFmpeg*"))
             {
-                var exe = Directory.EnumerateFiles(pkg, "ffmpeg.exe", SearchOption.AllDirectories).FirstOrDefault();
-                if (exe != null) return exe;
+                var path = Directory.EnumerateFiles(pkg, exe, SearchOption.AllDirectories).FirstOrDefault();
+                if (path != null) return path;
             }
         }
         return null;
+    }
+
+    private static bool Exists(string path)
+    {
+        try { return File.Exists(path); } catch { return false; /* malformed PATH entry */ }
     }
 }
