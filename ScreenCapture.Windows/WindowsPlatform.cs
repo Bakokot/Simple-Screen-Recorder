@@ -94,8 +94,11 @@ public sealed class WindowsPlatform : IPlatform, IDisposable
     public Task<byte[]?> ScreenshotPngAsync(Rectangle region, bool showCursor) => Task.Run(() => (byte[]?)ScreenshotPng(region, showCursor));
 
     /// <summary>One GDI frame, as for recordings: works for any zone, even spanning several screens.</summary>
+    /// <remarks>On an HDR screen GDI gets the brightness wrong, so Windows.Graphics.Capture is tried first.</remarks>
     private static unsafe byte[] ScreenshotPng(Rectangle region, bool showCursor)
     {
+        if (DdagrabCapture.HdrScreenshotPng(region, showCursor) is { } hdr) return hdr;
+
         using var grabber = new GdiFrameGrabber(region, showCursor);
         var pixels = grabber.Grab();
         fixed (byte* bits = pixels)
