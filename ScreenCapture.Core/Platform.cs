@@ -45,6 +45,9 @@ public interface IPlatform
     /// <summary>Ways to capture <paramref name="region"/>, best first; the recorder uses the first one that starts.</summary>
     /// <remarks>May ask the user for permission to capture the screen (Wayland).</remarks>
     Task<IReadOnlyList<VideoPipeline>> VideoPipelinesAsync(RecordingOptions options, Rectangle region);
+    /// <summary>A still picture of <paramref name="region"/> as a PNG image; null if the screen could not be read.</summary>
+    /// <remarks>May ask the user for permission to read the screen (Wayland).</remarks>
+    Task<byte[]?> ScreenshotPngAsync(Rectangle region, bool showCursor);
 
     // ---------------------------------------------------------------- desktop integration
 

@@ -126,11 +126,11 @@ public partial class MainWindow : Window
         FormatBox.SelectionChanged += (_, _) => UpdateAudioEnabled();
         SysAudioSwitch.IsCheckedChanged += (_, _) => UpdateAudioEnabled();
         MicSwitch.IsCheckedChanged += (_, _) => UpdateAudioEnabled();
-        AllAppsRadio.IsCheckedChanged += (_, _) => { if (AllAppsRadio.IsChecked == true) UpdateAudioEnabled(); };
+        // React to OnlyAppsRadio in both directions: the newly checked radio raises its event
+        // before the other one of the group is unchecked, so AllAppsRadio's would see a stale state.
         OnlyAppsRadio.IsCheckedChanged += (_, _) =>
         {
-            if (OnlyAppsRadio.IsChecked != true) return;
-            RefreshApps(SelectedAppExes());
+            if (OnlyAppsRadio.IsChecked == true) RefreshApps(SelectedAppExes());
             UpdateAudioEnabled();
         };
         // Apps started while the window was in the background show up when coming back to it.
@@ -491,12 +491,7 @@ public partial class MainWindow : Window
         var region = _region!.Value;
 
         var folder = OutputFolder;
-        try { Directory.CreateDirectory(folder); }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync($"Cannot use the output folder:\n{ex.Message}");
-            return;
-        }
+        if (!await CreateOutputFolderAsync(folder)) return;
 
         var format = SelectedFormat;
         var output = Path.Combine(folder, $"Capture_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}{FormatInfo.Extension(format)}");
@@ -581,9 +576,7 @@ public partial class MainWindow : Window
         try
         {
             var file = await recorder.StopAsync(new Progress<string>(s => StatusText.Text = s));
-            _lastFile = file;
-            StatusText.Text = $"Saved {Path.GetFileName(file)}";
-            OpenFileButton.IsVisible = true;
+            ShowSavedFile(file, image: false);
         }
         catch (Exception ex)
         {
@@ -605,8 +598,97 @@ public partial class MainWindow : Window
         RecordDot.Width = RecordDot.Height = recording ? 30 : 60;
         RecordDot.CornerRadius = new CornerRadius(recording ? 6 : 30);
         ToolTip.SetTip(RecordButton, recording ? "Stop recording" : "Start recording");
-        foreach (var c in new Control[] { RegionTile, ScreenTile, FormatBox, QualityBox, FpsBox, CursorSwitch, BorderSwitch, FolderBox, BrowseButton })
+        foreach (var c in new Control[] { RegionTile, ScreenTile, FormatBox, QualityBox, FpsBox, CursorSwitch, BorderSwitch, FolderBox, BrowseButton, ScreenshotButton })
             c.IsEnabled = !recording;
         UpdateAudioEnabled();
+    }
+
+    private async Task<bool> CreateOutputFolderAsync(string folder)
+    {
+        try
+        {
+            Directory.CreateDirectory(folder);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync($"Cannot use the output folder:\n{ex.Message}");
+            return false;
+        }
+    }
+
+    private void ShowSavedFile(string file, bool image)
+    {
+        _lastFile = file;
+        StatusText.Text = $"Saved {Path.GetFileName(file)}";
+        OpenFileText.Text = image ? "Open image" : "Open video";
+        OpenFileIcon.Symbol = image ? FluentIcons.Common.Symbol.Image : FluentIcons.Common.Symbol.Play;
+        OpenFileButton.IsVisible = true;
+    }
+
+    // ---------------------------------------------------------------- screenshot
+
+    private async void Screenshot_Click(object? sender, RoutedEventArgs e) => await TakeScreenshotAsync();
+
+    private async Task TakeScreenshotAsync()
+    {
+        if (_busy || _recorder != null) return;
+        if (_region == null && !await SelectZoneAsync()) return;
+        var region = _region!.Value;
+
+        var folder = OutputFolder;
+        if (!await CreateOutputFolderAsync(folder)) return;
+
+        _busy = true;
+        RecordButton.IsEnabled = ScreenshotButton.IsEnabled = false;
+        // This window is not kept out of captures everywhere (Linux): move it out of the way.
+        bool hide = PixelBounds().IntersectsWith(region);
+        byte[]? png;
+        try
+        {
+            if (hide)
+            {
+                Hide();
+                await Task.Delay(200); // let the window disappear
+            }
+            png = await _platform.ScreenshotPngAsync(region, CursorSwitch.IsChecked == true);
+        }
+        catch
+        {
+            png = null;
+        }
+        finally
+        {
+            if (hide)
+            {
+                Show();
+                Activate();
+            }
+            _busy = false;
+            RecordButton.IsEnabled = ScreenshotButton.IsEnabled = true;
+        }
+
+        if (png == null)
+        {
+            await ShowErrorAsync("Could not take the screenshot.");
+            return;
+        }
+        var file = Path.Combine(folder, $"Screenshot_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.png");
+        try { await File.WriteAllBytesAsync(file, png); }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync($"Could not save the screenshot:\n{ex.Message}");
+            return;
+        }
+        SaveSettings();
+        ShowSavedFile(file, image: true);
+    }
+
+    /// <summary>The window with its frame, in screen pixels.</summary>
+    private Rectangle PixelBounds()
+    {
+        var size = FrameSize ?? ClientSize;
+        double scale = DesktopScaling;
+        return new Rectangle(Position.X, Position.Y, (int)Math.Ceiling(size.Width * scale), (int)Math.Ceiling(size.Height * scale));
     }
 }

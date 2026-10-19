@@ -91,6 +91,23 @@ public sealed class WindowsPlatform : IPlatform, IDisposable
     public Task<IReadOnlyList<VideoPipeline>> VideoPipelinesAsync(RecordingOptions options, Rectangle region) =>
         Task.FromResult<IReadOnlyList<VideoPipeline>>(DdagrabCapture.Pipelines(options, region).ToList());
 
+    public Task<byte[]?> ScreenshotPngAsync(Rectangle region, bool showCursor) => Task.Run(() => (byte[]?)ScreenshotPng(region, showCursor));
+
+    /// <summary>One GDI frame, as for recordings: works for any zone, even spanning several screens.</summary>
+    private static unsafe byte[] ScreenshotPng(Rectangle region, bool showCursor)
+    {
+        using var grabber = new GdiFrameGrabber(region, showCursor);
+        var pixels = grabber.Grab();
+        fixed (byte* bits = pixels)
+        {
+            // 32bppRgb: BitBlt leaves the alpha bytes undefined.
+            using var bitmap = new Bitmap(region.Width, region.Height, region.Width * 4, PixelFormat.Format32bppRgb, (IntPtr)bits);
+            using var png = new MemoryStream();
+            bitmap.Save(png, ImageFormat.Png);
+            return png.ToArray();
+        }
+    }
+
     // ---------------------------------------------------------------- desktop integration
 
     public Task<Rectangle?> SelectRegionAsync(Rectangle? initial)

@@ -17,6 +17,8 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media.Imaging;
 using ScreenCapture.DBus;
 using Tmds.DBus;
@@ -66,6 +68,42 @@ public sealed class LinuxPlatform : IPlatform
     public Task<IReadOnlyList<VideoPipeline>> VideoPipelinesAsync(RecordingOptions options, Rectangle region) =>
         LinuxCapture.PipelinesAsync(options, region);
 
+    public async Task<byte[]?> ScreenshotPngAsync(Rectangle region, bool showCursor)
+    {
+        if (!LinuxCapture.IsWayland) return await Task.Run(() => X11Screenshot(region, showCursor));
+        // The portal only gives the whole desktop (without the cursor): cut the zone out of it.
+        if (await PortalScreenshotAsync() is not { } png) return null;
+        var screens = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow?.Screens.All;
+        if (screens is not { Count: > 0 }) return null;
+        var desktop = screens.Select(s => s.Bounds).Aggregate((a, b) => a.Union(b));
+        return Crop(png, region, desktop);
+    }
+
+    /// <summary>
+    /// The zone out of a picture of the whole desktop. Positions are in logical pixels while the picture may be
+    /// in device pixels (scaled screens): it is stretched over the desktop, as in the region selector.
+    /// </summary>
+    private static byte[]? Crop(byte[] png, Rectangle region, PixelRect desktop)
+    {
+        try
+        {
+            using var full = new Bitmap(new MemoryStream(png));
+            double sx = full.PixelSize.Width / (double)desktop.Width, sy = full.PixelSize.Height / (double)desktop.Height;
+            var source = new Rect((region.X - desktop.X) * sx, (region.Y - desktop.Y) * sy, region.Width * sx, region.Height * sy);
+            var size = new PixelSize(Math.Max(1, (int)Math.Round(source.Width)), Math.Max(1, (int)Math.Round(source.Height)));
+            using var target = new RenderTargetBitmap(size);
+            using (var g = target.CreateDrawingContext())
+                g.DrawImage(full, source, new Rect(0, 0, size.Width, size.Height));
+            using var output = new MemoryStream();
+            target.Save(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     // ---------------------------------------------------------------- desktop integration
 
     public async Task<Rectangle?> SelectRegionAsync(Rectangle? initial)
@@ -74,7 +112,7 @@ public sealed class LinuxPlatform : IPlatform
         var d = selector.Desktop;
         var png = await Task.Run(() => LinuxCapture.IsWayland
             ? PortalScreenshotAsync()
-            : Task.FromResult(X11Screenshot(new Rectangle(d.X, d.Y, d.Width, d.Height))));
+            : Task.FromResult(X11Screenshot(new Rectangle(d.X, d.Y, d.Width, d.Height), showCursor: false)));
         if (png != null)
         {
             try { selector.SetScreenshot(new Bitmap(new MemoryStream(png))); }
@@ -85,7 +123,7 @@ public sealed class LinuxPlatform : IPlatform
     }
 
     /// <summary>A PNG of part of the X screen, taken by FFmpeg; null if it failed.</summary>
-    private static byte[]? X11Screenshot(Rectangle area)
+    private static byte[]? X11Screenshot(Rectangle area, bool showCursor)
     {
         if (FfmpegLocator.Find() is not { } ffmpeg) return null;
         var display = Environment.GetEnvironmentVariable("DISPLAY") ?? ":0";
@@ -96,7 +134,7 @@ public sealed class LinuxPlatform : IPlatform
             RedirectStandardError = true,
         };
         foreach (var a in (string[])["-hide_banner", "-loglevel", "error", "-f", "x11grab",
-                     "-video_size", $"{area.Width}x{area.Height}", "-draw_mouse", "0",
+                     "-video_size", $"{area.Width}x{area.Height}", "-draw_mouse", showCursor ? "1" : "0",
                      "-i", string.Create(CultureInfo.InvariantCulture, $"{display}+{area.X},{area.Y}"),
                      "-frames:v", "1", "-c:v", "png", "-f", "image2pipe", "-"])
             psi.ArgumentList.Add(a);

@@ -15,6 +15,7 @@ barely touches its frame rate.
 - Record a **region** (drawn over a frozen screenshot: drag, move, resize, Enter to confirm) or a **whole screen**, on any monitor.
 - Optional **mouse cursor**, and an optional red frame showing the recorded zone (never visible in the video).
 - **10 to 60 fps.**
+- **Screenshots** of the same zone, saved as PNG.
 - Global shortcut: **Ctrl + Shift + F9** to start and stop, even while the app is in the background.
 
 **Performance**
@@ -104,6 +105,7 @@ The code is split by operating system:
 3. Choose the sound: system sound (all apps or only selected apps) and / or microphone.
 4. Click the red button, or press **Ctrl + Shift + F9**. Do the same again to stop.
    The video is saved in the chosen folder as `Capture_<date>_<time>.<ext>`.
+5. Or click the camera button for a still picture of the zone, saved as `Screenshot_<date>_<time>.png`.
 
 **Recording games:** turn off the red frame. Any window drawn over a game, even a click-through one,
 can keep it from presenting directly to the screen and lower its frame rate.

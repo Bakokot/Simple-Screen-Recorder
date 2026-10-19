@@ -121,6 +121,17 @@
             <Setter Property="Opacity" Value="0.4" />
         </Style>
 
+        <Style Selector="Button.screenshot">
+            <Setter Property="Width" Value="48" />
+            <Setter Property="Height" Value="48" />
+            <Setter Property="CornerRadius" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
         <Style Selector="TextBlock#TimerText">
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
         </Style>
@@ -272,10 +283,17 @@
             </Border>
 
             <!-- Record -->
-            <StackPanel x:Name="RecordPanel" Margin="0,10,0,0" HorizontalAlignment="Center">
-                <Button x:Name="RecordButton" Classes="record" HorizontalAlignment="Center" Click="Record_Click" ToolTip.Tip="Start recording">
-                    <Border x:Name="RecordDot" Width="60" Height="60" CornerRadius="30" Background="{StaticResource RecordRed}" />
-                </Button>
+            <StackPanel x:Name="RecordPanel" Margin="0,10,0,0">
+                <!-- The record button stays centered; the screenshot button sits on its right. -->
+                <Grid ColumnDefinitions="*,Auto,*">
+                    <Button x:Name="RecordButton" Grid.Column="1" Classes="record" Click="Record_Click" ToolTip.Tip="Start recording">
+                        <Border x:Name="RecordDot" Width="60" Height="60" CornerRadius="30" Background="{StaticResource RecordRed}" />
+                    </Button>
+                    <Button x:Name="ScreenshotButton" Grid.Column="2" Classes="screenshot" Margin="20,0,0,0"
+                            Click="Screenshot_Click" ToolTip.Tip="Take a screenshot of the zone">
+                        <ic:SymbolIcon Symbol="Camera" FontSize="22" />
+                    </Button>
+                </Grid>
                 <TextBlock x:Name="TimerText" Text="00:00:00" Margin="0,10,0,0" HorizontalAlignment="Center"
                            FontSize="22" FontWeight="SemiBold" FontFamily="Segoe UI Variable Display, Segoe UI, Cantarell, Ubuntu, sans-serif" />
                 <TextBlock x:Name="StatusText" Text="Ready" Margin="0,2,0,0" HorizontalAlignment="Center"
@@ -298,8 +316,8 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <Button x:Name="OpenFileButton" Classes="subtle" IsVisible="False" Click="OpenFile_Click" Margin="0,0,4,0">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <ic:SymbolIcon Symbol="Play" FontSize="16" />
-                            <TextBlock Text="Open video" />
+                            <ic:SymbolIcon x:Name="OpenFileIcon" Symbol="Play" FontSize="16" />
+                            <TextBlock x:Name="OpenFileText" Text="Open video" />
                         </StackPanel>
                     </Button>
                     <Button Classes="subtle" Click="OpenFolder_Click">
